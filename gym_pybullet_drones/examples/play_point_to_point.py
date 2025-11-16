@@ -53,7 +53,8 @@ def run_episode(
         )
 
     raw_obs, info = env.reset()
-    print(f"[INFO] Direction hint: {info.get('direction_hint')} (index {info.get('direction_hint_index')})")
+    print(f"[INFO] Drone start position: {info.get('drone_position')}")
+    print(f"[INFO] Target position: {info.get('target_position')}")
     obs = prepare_observation(raw_obs, env.OBS_TYPE)
     start_wall = time.time()
 
@@ -61,6 +62,9 @@ def run_episode(
         action, _ = model.predict(obs, deterministic=True)
         raw_obs, reward, terminated, truncated, info = env.step(action)
         obs = prepare_observation(raw_obs, env.OBS_TYPE)
+        
+        if step % 10 == 0:
+            print(f"[Step {step}] Drone: {info.get('drone_position')}, Distance: {info.get('distance_to_target'):.3f}m")
 
         if env.OBS_TYPE == ObservationType.KIN and logger is not None:
             drone_state = env._getDroneStateVector(0)

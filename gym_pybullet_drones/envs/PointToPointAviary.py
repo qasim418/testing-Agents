@@ -93,21 +93,6 @@ class PointToPointAviary(BaseRLAviary):
         self._target_marker_color = (0.85, 0.1, 0.1, 0.9)
         self._marker_bodies: list[int] = []
         self._marker_debug_ids: list[int] = []
-        self._hint_dim = 8
-        self._direction_names = [
-            "east",
-            "northeast",
-            "north",
-            "northwest",
-            "west",
-            "southwest",
-            "south",
-            "southeast",
-        ]
-        self._direction_hint_index = 0
-        self._direction_hint_label = self._direction_names[self._direction_hint_index]
-        self._direction_hint_one_hot = np.zeros(self._hint_dim, dtype=np.float32)
-        self._direction_hint_planes: Optional[np.ndarray] = None
         self._success_snapshot_dir = success_snapshot_dir
         self._episode_counter = 0
         self._captured_snapshot = False
@@ -163,7 +148,6 @@ class PointToPointAviary(BaseRLAviary):
         self._captured_snapshot = False
         self._last_snapshot_path = None
         self._last_rgb_frame = None
-        self._update_direction_hint()
         obs, info = super().reset(seed=seed, options=options)
         self._clear_markers()
         self._spawn_markers()
@@ -173,8 +157,7 @@ class PointToPointAviary(BaseRLAviary):
         info.update({
             "target_position": self._target_position.copy(),
             "distance_to_target": float(self._last_distance),
-            "direction_hint": self._direction_hint_label,
-            "direction_hint_index": int(self._direction_hint_index),
+            "drone_position": self._getDroneStateVector(0)[0:3].copy(),
             "snapshot_path": self._last_snapshot_path,
         })
         return obs, info
@@ -193,10 +176,9 @@ class PointToPointAviary(BaseRLAviary):
         info.update({
             "target_position": self._target_position.copy(),
             "distance_to_target": float(self._last_distance),
+            "drone_position": self._getDroneStateVector(0)[0:3].copy(),
             "action_index": action_index,
             "elapsed_steps": self._elapsed_steps,
-            "direction_hint": self._direction_hint_label,
-            "direction_hint_index": int(self._direction_hint_index),
             "snapshot_path": self._last_snapshot_path,
         })
         return obs, reward, bool(terminated), bool(truncated), info
@@ -258,7 +240,7 @@ class PointToPointAviary(BaseRLAviary):
 
         height = int(self.IMG_RES[1])
         width = int(self.IMG_RES[0])
-        channels = 4 + self._hint_dim
+        channels = 4
         return spaces.Box(low=0, high=255, shape=(height, width, channels), dtype=np.uint8)
 
     def _computeObs(self):
@@ -289,21 +271,11 @@ class PointToPointAviary(BaseRLAviary):
         else:
             base_images_uint8 = base_images
 
-        height = int(self.IMG_RES[1])
-        width = int(self.IMG_RES[0])
-        channels = 4 + self._hint_dim
-        images = np.zeros((self.NUM_DRONES, height, width, channels), dtype=np.uint8)
-        hint_planes = self._direction_hint_planes
-        if hint_planes is None:
-            hint_value = (self._direction_hint_one_hot * 255.0).astype(np.uint8)
-            hint_planes = np.tile(hint_value, (height, width, 1))
         for i in range(self.NUM_DRONES):
-            rgb_uint8 = base_images_uint8[i]
-            images[i, :, :, :4] = rgb_uint8
-            images[i, :, :, 4:] = hint_planes
             if i == 0:
+                rgb_uint8 = base_images_uint8[i]
                 self._last_rgb_frame = rgb_uint8[:, :, :3].copy()
-        return images
+        return base_images_uint8
 
     def _computeReward(self):
         state = self._getDroneStateVector(0)
@@ -342,8 +314,7 @@ class PointToPointAviary(BaseRLAviary):
         return {
             "target_position": self._target_position.copy(),
             "distance_to_target": float(self._last_distance),
-            "direction_hint": self._direction_hint_label,
-            "direction_hint_index": int(self._direction_hint_index),
+            "drone_position": self._getDroneStateVector(0)[0:3].copy(),
             "snapshot_path": self._last_snapshot_path,
         }
 
@@ -370,27 +341,6 @@ class PointToPointAviary(BaseRLAviary):
         y = self._rng.uniform(-self._max_xy * 0.8, self._max_xy * 0.8)
         z = self._rng.uniform(z_min, self._max_z * 0.9)
         return np.array([x, y, z], dtype=np.float32)
-
-    def _update_direction_hint(self) -> None:
-        vec = self._target_position[:2] - self._start_position[:2]
-        if np.linalg.norm(vec) < 1e-6:
-            index = 0
-        else:
-            angle = math.atan2(vec[1], vec[0])
-            angle = (angle + 2.0 * math.pi) % (2.0 * math.pi)
-            sector = (2.0 * math.pi) / self._hint_dim
-            index = int(math.floor((angle + sector / 2.0) / sector)) % self._hint_dim
-        self._direction_hint_index = index
-        self._direction_hint_one_hot = np.zeros(self._hint_dim, dtype=np.float32)
-        self._direction_hint_one_hot[self._direction_hint_index] = 1.0
-        self._direction_hint_label = self._direction_names[self._direction_hint_index]
-        if self.OBS_TYPE == ObservationType.RGB:
-            value = (self._direction_hint_one_hot * 255.0).astype(np.uint8)
-            height = int(self.IMG_RES[1])
-            width = int(self.IMG_RES[0])
-            self._direction_hint_planes = np.tile(value, (height, width, 1))
-        else:
-            self._direction_hint_planes = None
 
     def _maybe_capture_goal_snapshot(self) -> None:
         if (
