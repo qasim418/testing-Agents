@@ -67,17 +67,13 @@ class PointToPointAviary(BaseRLAviary):
         self._city_size = int(city_size)
         self._action_dim = 4
         self._discrete_actions = {
-            0: np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32),
-            1: np.array([1.0, 0.0, 0.0, 1.0], dtype=np.float32),
-            2: np.array([-1.0, 0.0, 0.0, 1.0], dtype=np.float32),
-            3: np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32),
-            4: np.array([0.0, -1.0, 0.0, 1.0], dtype=np.float32),
-            5: np.array([0.0, 0.0, 1.0, 1.0], dtype=np.float32),
-            6: np.array([0.0, 0.0, -1.0, 1.0], dtype=np.float32),
-            7: np.array([1.0, 1.0, 0.0, 1.0], dtype=np.float32),
-            8: np.array([-1.0, 1.0, 0.0, 1.0], dtype=np.float32),
-            9: np.array([1.0, -1.0, 0.0, 1.0], dtype=np.float32),
-            10: np.array([-1.0, -1.0, 0.0, 1.0], dtype=np.float32),
+            0: np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32),  # Hover
+            1: np.array([1.0, 0.0, 0.0, 1.0], dtype=np.float32),   # Forward (+X)
+            2: np.array([-1.0, 0.0, 0.0, 1.0], dtype=np.float32),  # Backward (-X)
+            3: np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32),   # Right (+Y)
+            4: np.array([0.0, -1.0, 0.0, 1.0], dtype=np.float32),  # Left (-Y)
+            5: np.array([0.0, 0.0, 1.0, 1.0], dtype=np.float32),   # Up (+Z)
+            6: np.array([0.0, 0.0, -1.0, 1.0], dtype=np.float32),  # Down (-Z)
         }
         self._num_actions = len(self._discrete_actions)
         self._obs_dim = 15 if obs == ObservationType.KIN else None

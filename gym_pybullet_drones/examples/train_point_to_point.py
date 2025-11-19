@@ -188,26 +188,32 @@ def main(args: argparse.Namespace) -> None:
         train_env = VecTransposeImage(train_env)
 
     # Evaluation environment (single instance, deterministic)
-    eval_seed = (args.seed + 123) if args.seed is not None else None
+    # Skip eval env creation when GUI is on (PyBullet only allows one GUI instance)
+    if args.gui:
+        eval_env = None
+        print("[INFO] GUI mode enabled - skipping separate eval environment creation")
+        print("[INFO] Evaluation will be disabled during training with GUI")
+    else:
+        eval_seed = (args.seed + 123) if args.seed is not None else None
 
-    def make_eval_env() -> Monitor:
-        return Monitor(
-            build_env(
-                gui=args.gui,
-                seed=eval_seed,
-                obs=obs_enum,
-                use_built_in_obstacles=args.built_in_obstacles,
-                snapshot_dir=eval_snapshot_dir,
-                use_city_world=args.use_city_world,
-                city_size=args.city_size,
+        def make_eval_env() -> Monitor:
+            return Monitor(
+                build_env(
+                    gui=False,
+                    seed=eval_seed,
+                    obs=obs_enum,
+                    use_built_in_obstacles=args.built_in_obstacles,
+                    snapshot_dir=eval_snapshot_dir,
+                    use_city_world=args.use_city_world,
+                    city_size=args.city_size,
+                )
             )
-        )
 
-    eval_vec_env: DummyVecEnv = DummyVecEnv([make_eval_env])
-    eval_vec_env = VecMonitor(eval_vec_env, os.path.join(run_dir, "eval_monitor"))
-    if obs_choice == "rgb":
-        eval_vec_env = VecTransposeImage(eval_vec_env)
-    eval_env = eval_vec_env
+        eval_vec_env: DummyVecEnv = DummyVecEnv([make_eval_env])
+        eval_vec_env = VecMonitor(eval_vec_env, os.path.join(run_dir, "eval_monitor"))
+        if obs_choice == "rgb":
+            eval_vec_env = VecTransposeImage(eval_vec_env)
+        eval_env = eval_vec_env
 
     policy_kwargs = dict(net_arch=[256, 256])
     policy_type = "CnnPolicy" if obs_choice == "rgb" else "MlpPolicy"
@@ -231,23 +237,27 @@ def main(args: argparse.Namespace) -> None:
         device=args.device,
     )
 
-    stop_callback = StopTrainingOnRewardThreshold(
-        reward_threshold=args.target_reward,
-        verbose=1,
-    )
-    eval_callback = EvalCallback(
-        eval_env,
-        callback_on_new_best=stop_callback,
-        best_model_save_path=run_dir,
-        log_path=run_dir,
-        eval_freq=args.eval_freq,
-        deterministic=True,
-        render=args.gui,
-        n_eval_episodes=args.n_eval_episodes,
-    )
-
     metrics_callback = DetailedMetricsCallback(sample_size=args.metric_sample_size)
-    callback = CallbackList([eval_callback, metrics_callback])
+    
+    # Only setup evaluation callback if eval_env exists (not in GUI mode)
+    if eval_env is not None:
+        stop_callback = StopTrainingOnRewardThreshold(
+            reward_threshold=args.target_reward,
+            verbose=1,
+        )
+        eval_callback = EvalCallback(
+            eval_env,
+            callback_on_new_best=stop_callback,
+            best_model_save_path=run_dir,
+            log_path=run_dir,
+            eval_freq=args.eval_freq,
+            deterministic=True,
+            render=False,
+            n_eval_episodes=args.n_eval_episodes,
+        )
+        callback = CallbackList([eval_callback, metrics_callback])
+    else:
+        callback = metrics_callback
 
     new_logger = configure(run_dir, ["stdout", "csv", "tensorboard"])
     model.set_logger(new_logger)
@@ -260,22 +270,30 @@ def main(args: argparse.Namespace) -> None:
     if not os.path.isfile(best_model_path) and os.path.isfile(final_model_path):
         shutil.copy(final_model_path, best_model_path)
 
-    mean_reward, std_reward = evaluate_policy(
-        model,
-        eval_env,
-        n_eval_episodes=args.n_eval_episodes,
-        deterministic=True,
-        render=args.gui,
-    )
+    # Only run final evaluation if eval_env exists (not in GUI mode)
+    if eval_env is not None:
+        mean_reward, std_reward = evaluate_policy(
+            model,
+            eval_env,
+            n_eval_episodes=args.n_eval_episodes,
+            deterministic=True,
+            render=False,
+        )
 
-    print("=" * 80)
-    print("Evaluation summary")
-    print(f"Episodes: {args.n_eval_episodes}")
-    print(f"Mean reward: {mean_reward:.2f} ± {std_reward:.2f}")
-    print(f"Artifacts saved to: {run_dir}")
-    print("=" * 80)
-
-    eval_env.close()
+        print("=" * 80)
+        print("Evaluation summary")
+        print(f"Episodes: {args.n_eval_episodes}")
+        print(f"Mean reward: {mean_reward:.2f} ± {std_reward:.2f}")
+        print(f"Artifacts saved to: {run_dir}")
+        print("=" * 80)
+        
+        eval_env.close()
+    else:
+        print("=" * 80)
+        print("Training completed in GUI mode (evaluation skipped)")
+        print(f"Artifacts saved to: {run_dir}")
+        print("=" * 80)
+    
     train_env.close()
 
 
