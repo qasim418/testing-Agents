@@ -2,6 +2,11 @@
 TODOs.md
 examples/debug.py
 examples/test.py
+gym-pybullet/examples/debug_predict.py
+gym-pybullet/examples/debug_direction_hint.py
+gym-pybullet/examples/show_point_to_point_world.py
+train_p2p_dqn.slurm
+
 
 # NumPy saves and videos
 results/

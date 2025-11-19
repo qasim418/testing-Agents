@@ -115,6 +115,8 @@ def build_env(
     obs: ObservationType,
     use_built_in_obstacles: bool,
     snapshot_dir: Optional[str],
+    use_city_world: bool,
+    city_size: int,
 ) -> PointToPointAviary:
     """Construct a fresh instance of the point-to-point environment."""
 
@@ -128,6 +130,8 @@ def build_env(
         obs=obs,
         ctrl_freq=ctrl_freq,
         use_built_in_obstacles=use_built_in_obstacles,
+        use_city_world=use_city_world,
+        city_size=city_size,
         success_snapshot_dir=snapshot_dir,
         seed=seed,
     )
@@ -151,18 +155,34 @@ def main(args: argparse.Namespace) -> None:
         snapshot_dir = os.path.join(run_dir, "goal_snapshots")
         eval_snapshot_dir = os.path.join(run_dir, "goal_snapshots_eval")
 
-    # Vectorized training environment
-    train_env = make_vec_env(
-        lambda: build_env(
-            gui=False,
-            seed=None,
-            obs=obs_enum,
-            use_built_in_obstacles=args.built_in_obstacles,
-            snapshot_dir=snapshot_dir,
-        ),
-        n_envs=args.num_envs,
-        seed=args.seed,
-    )
+    # Training environment (GUI optional when num_envs == 1)
+    if args.gui and args.num_envs == 1:
+        # Use a single env with GUI for visual inspection
+        train_env = DummyVecEnv([
+            lambda: build_env(
+                gui=True,
+                seed=None,
+                obs=obs_enum,
+                use_built_in_obstacles=args.built_in_obstacles,
+                snapshot_dir=snapshot_dir,
+                use_city_world=args.use_city_world,
+                city_size=args.city_size,
+            )
+        ])
+    else:
+        train_env = make_vec_env(
+            lambda: build_env(
+                gui=False,
+                seed=None,
+                obs=obs_enum,
+                use_built_in_obstacles=args.built_in_obstacles,
+                snapshot_dir=snapshot_dir,
+                use_city_world=args.use_city_world,
+                city_size=args.city_size,
+            ),
+            n_envs=args.num_envs,
+            seed=args.seed,
+        )
     train_env = VecMonitor(train_env, os.path.join(run_dir, "train_monitor"))
     if obs_choice == "rgb":
         train_env = VecTransposeImage(train_env)
@@ -173,11 +193,13 @@ def main(args: argparse.Namespace) -> None:
     def make_eval_env() -> Monitor:
         return Monitor(
             build_env(
-                gui=args.gui_eval,
+                gui=args.gui,
                 seed=eval_seed,
                 obs=obs_enum,
                 use_built_in_obstacles=args.built_in_obstacles,
                 snapshot_dir=eval_snapshot_dir,
+                use_city_world=args.use_city_world,
+                city_size=args.city_size,
             )
         )
 
@@ -220,7 +242,7 @@ def main(args: argparse.Namespace) -> None:
         log_path=run_dir,
         eval_freq=args.eval_freq,
         deterministic=True,
-        render=args.gui_eval,
+        render=args.gui,
         n_eval_episodes=args.n_eval_episodes,
     )
 
@@ -243,7 +265,7 @@ def main(args: argparse.Namespace) -> None:
         eval_env,
         n_eval_episodes=args.n_eval_episodes,
         deterministic=True,
-        render=args.gui_eval,
+        render=args.gui,
     )
 
     print("=" * 80)
@@ -297,14 +319,18 @@ if __name__ == "__main__":
                         help="Computation device (default: 'auto')")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, metavar="",
                         help=f"Random seed (default: {DEFAULT_SEED})")
-    parser.add_argument("--gui_eval", type=str2bool, default=False, metavar="",
-                        help="Render evaluation episodes (default: False)")
+    parser.add_argument("--gui", type=str2bool, default=False, metavar="",
+                        help="Render GUI for training (num_envs must be 1) and evaluation (default: False)")
     parser.add_argument("--progress_bar", type=str2bool, default=True, metavar="",
                         help="Display tqdm progress bar (default: True)")
     parser.add_argument("--obs_type", type=str, default="rgb", choices=["kin", "rgb"], metavar="",
                         help="Observation modality: 'kin' for kinematics, 'rgb' for vision (default: rgb)")
-    parser.add_argument("--built_in_obstacles", type=str2bool, default=True, metavar="",
-                        help="Load PyBullet's default obstacle set (default: True)")
+    parser.add_argument("--built_in_obstacles", type=str2bool, default=False, metavar="",
+                        help="Load PyBullet's default obstacle set (default: False)")
+    parser.add_argument("--use_city_world", type=str2bool, default=True, metavar="",
+                        help="Use procedural City world obstacles (default: True)")
+    parser.add_argument("--city_size", type=int, default=50, metavar="",
+                        help="City half-extent used by City world (default: 50)")
     parser.add_argument("--save_goal_snapshots", type=str2bool, default=True, metavar="",
                         help="Capture and store RGB frames when the agent reaches the goal (default: True)")
 

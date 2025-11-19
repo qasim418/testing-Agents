@@ -9,6 +9,7 @@ from PIL import Image
 
 from gym_pybullet_drones.envs.BaseAviary import BaseAviary
 from gym_pybullet_drones.envs.BaseRLAviary import BaseRLAviary
+from gym_pybullet_drones.envs.city_world import CityGenerator
 from gym_pybullet_drones.utils.enums import ActionType, DroneModel, ObservationType, Physics
 
 
@@ -25,7 +26,7 @@ class PointToPointAviary(BaseRLAviary):
         ctrl_freq: int = 30,
         gui: bool = False,
         record: bool = False,
-        obs: ObservationType = ObservationType.KIN,
+        obs: ObservationType = ObservationType.RGB,
         target_position: Optional[np.ndarray] = None,
         episode_len_sec: float = 12.0,
         target_tolerance: float = 0.1,
@@ -38,6 +39,8 @@ class PointToPointAviary(BaseRLAviary):
         min_start_target_separation: float = 0.3,
         velocity_scale: float = 1.5,
         use_built_in_obstacles: bool = False,
+        use_city_world: bool = True,
+        city_size: int = 50,
         success_snapshot_dir: Optional[str] = None,
         seed: Optional[int] = None,
     ) -> None:
@@ -60,6 +63,8 @@ class PointToPointAviary(BaseRLAviary):
         self._episode_len_sec = float(episode_len_sec)
         self.EPISODE_LEN_SEC = self._episode_len_sec
         self._use_built_in_obstacles = bool(use_built_in_obstacles)
+        self._use_city_world = bool(use_city_world)
+        self._city_size = int(city_size)
         self._action_dim = 4
         self._discrete_actions = {
             0: np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32),
@@ -81,10 +86,15 @@ class PointToPointAviary(BaseRLAviary):
         self._progress_gain = 20.0
         self._success_bonus = 100.0
         self._crash_penalty = 50.0
-        self._step_penalty = 0.001
+        # Stronger shaping defaults (RGB-style)
+        self._step_penalty = 0.005
+        self._distance_penalty_gain = 0.05
+        self._hover_penalty = 0.02
+        self._distance_reduction_bonus = 0.5
         self._velocity_limit = max(self._velocity_scale * 2.0, 1.0)
         self._max_episode_steps = int(self._episode_len_sec * ctrl_freq)
         self._last_action = np.zeros((1, self._action_dim), dtype=np.float32)
+        self._last_action_index = 0
         self._last_distance = 0.0
         self._prev_distance = 0.0
         self._elapsed_steps = 0
@@ -128,9 +138,18 @@ class PointToPointAviary(BaseRLAviary):
             act=ActionType.VEL,
         )
         self.SPEED_LIMIT = self._velocity_scale
+        # Collision shaping
+        self._object_collision_penalty = 2.0
 
     def _addObstacles(self):
-        if self._use_built_in_obstacles:
+        # Always call base to ensure ground/arena are spawned if needed
+        # but skip the base's built-in obstacles when using the city world
+        if self._use_city_world:
+            # Base class typically loads plane/arena. Avoid double planes by not calling BaseAviary._addObstacles
+            super()._addObstacles()
+            # Spawn procedural city objects into the current physics client
+            CityGenerator(self.CLIENT, seed=int(self._rng.integers(0, 1_000_000))).generate(size=self._city_size)
+        elif self._use_built_in_obstacles:
             BaseAviary._addObstacles(self)
         else:
             super()._addObstacles()
@@ -169,6 +188,7 @@ class PointToPointAviary(BaseRLAviary):
         command = self._discrete_actions[action_index]
         tiled_action = np.tile(command, (self.NUM_DRONES, 1))
         self._last_action = tiled_action.astype(np.float32)
+        self._last_action_index = action_index
         self._prev_distance = self._last_distance
         obs, reward, terminated, truncated, info = super().step(tiled_action)
         self._elapsed_steps += 1
@@ -287,6 +307,18 @@ class PointToPointAviary(BaseRLAviary):
         reward -= self._velocity_penalty_gain * np.linalg.norm(velocity)
         reward -= self._control_penalty_gain * np.linalg.norm(self._last_action[0, :3])
         reward -= self._step_penalty
+        reward -= self._distance_penalty_gain * distance
+        if self._last_action_index == 0:
+            reward -= self._hover_penalty
+        if progress > 0:
+            reward += self._distance_reduction_bonus * progress
+        # Contact-based collision shaping: penalize any physical contacts
+        try:
+            contacts = p.getContactPoints(bodyA=self.DRONE_IDS[0], physicsClientId=self.CLIENT)
+            if contacts and len(contacts) > 0:
+                reward -= self._object_collision_penalty
+        except Exception:
+            pass
         if self._is_success(distance):
             self._maybe_capture_goal_snapshot()
             reward += self._success_bonus
