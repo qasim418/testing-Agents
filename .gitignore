@@ -7,7 +7,7 @@ gym-pybullet/examples/debug_direction_hint.py
 gym-pybullet/examples/show_point_to_point_world.py
 train_p2p_dqn.slurm
 
-
+train_p2p_dqn.sh
 # NumPy saves and videos
 results/
 tmp/
