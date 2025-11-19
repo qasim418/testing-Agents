@@ -30,7 +30,7 @@ class PointToPointAviary(BaseRLAviary):
         target_position: Optional[np.ndarray] = None,
         episode_len_sec: float = 12.0,
         target_tolerance: float = 0.1,
-        max_xy: float = 2.0,
+        max_xy: float = 50.0,
         max_z: float = 2.0,
         min_z: float = 0.05,
         tilt_limit_rad: float = math.radians(50.0),
@@ -80,7 +80,7 @@ class PointToPointAviary(BaseRLAviary):
         self._velocity_penalty_gain = 0.05
         self._control_penalty_gain = 0.02
         self._progress_gain = 20.0
-        self._success_bonus = 100.0
+        self._success_bonus = 200.0
         self._crash_penalty = 50.0
         # Stronger shaping defaults (RGB-style)
         self._step_penalty = 0.005
@@ -187,6 +187,10 @@ class PointToPointAviary(BaseRLAviary):
         self._last_action_index = action_index
         self._prev_distance = self._last_distance
         obs, reward, terminated, truncated, info = super().step(tiled_action)
+        
+        if self.GUI:
+            self._update_camera()
+
         self._elapsed_steps += 1
         info = dict(info)
         info.update({
@@ -198,6 +202,23 @@ class PointToPointAviary(BaseRLAviary):
             "snapshot_path": self._last_snapshot_path,
         })
         return obs, reward, bool(terminated), bool(truncated), info
+
+    def _update_camera(self):
+        if not self.GUI:
+            return
+        # Get current camera state to preserve user's rotation/zoom
+        cam_info = p.getDebugVisualizerCamera(physicsClientId=self.CLIENT)
+        # cam_info: width, height, viewMatrix, projectionMatrix, cameraUp, cameraForward, horizontal, vertical, yaw, pitch, dist, target
+        
+        # Update target to drone's position
+        drone_pos = self._getDroneStateVector(0)[0:3]
+        
+        p.resetDebugVisualizerCamera(cameraDistance=cam_info[10],
+                                     cameraYaw=cam_info[8],
+                                     cameraPitch=cam_info[9],
+                                     cameraTargetPosition=drone_pos,
+                                     physicsClientId=self.CLIENT
+                                     )
 
     def _actionSpace(self):
         self.action_buffer.clear()
@@ -339,11 +360,14 @@ class PointToPointAviary(BaseRLAviary):
         return False
 
     def _computeInfo(self):
+        state = self._getDroneStateVector(0)
         return {
             "target_position": self._target_position.copy(),
             "distance_to_target": float(self._last_distance),
-            "drone_position": self._getDroneStateVector(0)[0:3].copy(),
+            "drone_position": state[0:3].copy(),
             "snapshot_path": self._last_snapshot_path,
+            "is_success": self._is_success(self._last_distance),
+            "is_crash": self._is_crash(state[0:3], state[7:10])
         }
 
     def _preprocessAction(self, action):
@@ -365,8 +389,9 @@ class PointToPointAviary(BaseRLAviary):
         return start.astype(np.float32), target.astype(np.float32)
 
     def _sample_position(self, z_min: float = 0.1) -> np.ndarray:
-        x = self._rng.uniform(-self._max_xy * 0.8, self._max_xy * 0.8)
-        y = self._rng.uniform(-self._max_xy * 0.8, self._max_xy * 0.8)
+        xy_limit = self._max_xy * 0.98  # keep slight margin to avoid instant boundary hits
+        x = self._rng.uniform(-xy_limit, xy_limit)
+        y = self._rng.uniform(-xy_limit, xy_limit)
         z = self._rng.uniform(z_min, self._max_z * 0.9)
         return np.array([x, y, z], dtype=np.float32)
 

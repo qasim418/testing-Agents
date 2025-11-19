@@ -63,8 +63,9 @@ def run_episode(
         raw_obs, reward, terminated, truncated, info = env.step(action)
         obs = prepare_observation(raw_obs, env.OBS_TYPE)
         
-        if step % 10 == 0:
-            print(f"[Step {step}] Drone: {info.get('drone_position')}, Distance: {info.get('distance_to_target'):.3f}m")
+        # Print action and status every step for debugging
+        action_name = ["Hover", "Fwd", "Back", "Right", "Left", "Up", "Down"][int(action)]
+        print(f"[Step {step}] Act: {action_name} | Pos: {info.get('drone_position')} | Dist: {info.get('distance_to_target'):.2f}m")
 
         if env.OBS_TYPE == ObservationType.KIN and logger is not None:
             drone_state = env._getDroneStateVector(0)
@@ -83,9 +84,20 @@ def run_episode(
 
         if env.GUI:
             sync(step, start_wall, env.CTRL_TIMESTEP)
-            env.render()
+            # env.render() # Disabled to reduce log noise
 
         if terminated or truncated:
+            if terminated:
+                if info.get('is_success'):
+                    print("[INFO] Episode Success!")
+                elif info.get('is_crash'):
+                    print("[INFO] Episode Crashed!")
+                else:
+                    print("[INFO] Episode Terminated (Other)")
+            if truncated:
+                print("[INFO] Episode Truncated (Timeout)")
+            
+            time.sleep(3) # Pause to let user see the final state
             break
 
     if logger is not None:
@@ -131,6 +143,8 @@ def main(args: argparse.Namespace) -> None:
              obs=obs_enum,
             ctrl_freq=24 if obs_enum == ObservationType.RGB else 30,
             use_built_in_obstacles=args.built_in_obstacles,
+            use_city_world=args.use_city_world,
+            city_size=args.city_size,
             success_snapshot_dir=snapshot_dir,
             seed=seed,
             record=args.record_video or args.record_frames,
@@ -178,7 +192,7 @@ if __name__ == "__main__":
                         help="Maximum episode length in seconds")
     parser.add_argument("--velocity_scale", type=float, default=1.5,
                         help="Scale for discrete velocity commands (m/s)")
-    parser.add_argument("--max_xy", type=float, default=2.0,
+    parser.add_argument("--max_xy", type=float, default=50.0,
                         help="Horizontal workspace half-extent (meters)")
     parser.add_argument("--max_z", type=float, default=2.0,
                         help="Maximum flight altitude (meters)")
@@ -186,6 +200,10 @@ if __name__ == "__main__":
                         help="Distance threshold for considering the goal reached (meters)")
     parser.add_argument("--built_in_obstacles", type=utils_str2bool, default=True,
                         help="Enable the default PyBullet obstacle set")
+    parser.add_argument("--use_city_world", type=utils_str2bool, default=False,
+                        help="Use procedural City world obstacles (default: False)")
+    parser.add_argument("--city_size", type=int, default=50,
+                        help="City half-extent used by City world (default: 50)")
     parser.add_argument("--obs_type", type=str, default="kin", choices=["kin", "rgb"],
                         help="Observation modality to match the trained policy")
     parser.add_argument("--snapshot_dir", type=str, default=None,
