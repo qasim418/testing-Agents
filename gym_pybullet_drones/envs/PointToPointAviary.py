@@ -30,7 +30,7 @@ class PointToPointAviary(BaseRLAviary):
         target_position: Optional[np.ndarray] = None,
         episode_len_sec: float = 12.0,
         target_tolerance: float = 0.1,
-        max_xy: float = 30.0,
+        max_xy: float = 5.0,
         max_z: float = 2.0,
         min_z: float = 0.05,
         tilt_limit_rad: float = math.radians(50.0),

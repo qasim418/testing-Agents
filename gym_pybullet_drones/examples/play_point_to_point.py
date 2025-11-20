@@ -192,7 +192,7 @@ if __name__ == "__main__":
                         help="Maximum episode length in seconds")
     parser.add_argument("--velocity_scale", type=float, default=1.5,
                         help="Scale for discrete velocity commands (m/s)")
-    parser.add_argument("--max_xy", type=float, default=30.0,
+    parser.add_argument("--max_xy", type=float, default=5.0,
                         help="Horizontal workspace half-extent (meters)")
     parser.add_argument("--max_z", type=float, default=2.0,
                         help="Maximum flight altitude (meters)")
