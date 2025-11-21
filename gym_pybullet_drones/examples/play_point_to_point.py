@@ -108,7 +108,7 @@ def main(args: argparse.Namespace) -> None:
     if not os.path.isfile(args.model_path):
         raise FileNotFoundError(f"Model file not found: {args.model_path}")
 
-    model = DQN.load(args.model_path)
+    model = DQN.load(args.model_path, load_replay_buffer=False)
     obs_choice = args.obs_type.lower()
     if obs_choice not in {"kin", "rgb"}:
         raise ValueError("obs_type must be either 'kin' or 'rgb'")

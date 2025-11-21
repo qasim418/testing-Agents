@@ -33,11 +33,11 @@ class PointToPointAviary(BaseRLAviary):
         max_xy: float = 5.0,
         max_z: float = 2.0,
         min_z: float = 0.05,
-        tilt_limit_rad: float = math.radians(50.0),
+        tilt_limit_rad: float = math.pi, # Relaxed to 180 degrees
         randomize_start: bool = False,
         randomize_target: bool = True,
         min_start_target_separation: float = 0.3,
-        velocity_scale: float = 1.5,
+        velocity_scale: float = 1.0, # Reduced from 1.5
         use_built_in_obstacles: bool = False,
         use_city_world: bool = True,
         city_size: int = 50,
@@ -114,7 +114,7 @@ class PointToPointAviary(BaseRLAviary):
         self._start_position = (
             np.array(initial_xyzs[0], dtype=np.float32)
             if initial_xyzs is not None
-            else np.array([0.0, 0.0, 0.1], dtype=np.float32)
+            else np.array([0.0, 0.0, 1.0], dtype=np.float32)
         )
         if initial_xyzs is None:
             initial_xyzs = np.array([self._start_position], dtype=np.float32)
@@ -321,12 +321,12 @@ class PointToPointAviary(BaseRLAviary):
         distance = np.linalg.norm(self._target_position - position)
         progress = self._prev_distance - distance
         reward = self._progress_gain * progress
-        reward -= self._velocity_penalty_gain * np.linalg.norm(velocity)
-        reward -= self._control_penalty_gain * np.linalg.norm(self._last_action[0, :3])
+        # reward -= self._velocity_penalty_gain * np.linalg.norm(velocity)
+        # reward -= self._control_penalty_gain * np.linalg.norm(self._last_action[0, :3])
         reward -= self._step_penalty
-        reward -= self._distance_penalty_gain * distance
-        if self._last_action_index == 0:
-            reward -= self._hover_penalty
+        # reward -= self._distance_penalty_gain * distance
+        # if self._last_action_index == 0:
+        #     reward -= self._hover_penalty
         if progress > 0:
             reward += self._distance_reduction_bonus * progress
         # Contact-based collision shaping: penalize any physical contacts
@@ -445,7 +445,7 @@ class PointToPointAviary(BaseRLAviary):
         return distance <= self._target_tolerance
 
     def _is_crash(self, position: np.ndarray, rpy: np.ndarray) -> bool:
-        if position[2] <= self._min_z or position[2] >= self._max_z:
+        if position[2] <= 0.01 or position[2] >= self._max_z: # Relaxed crash condition
             return True
         if abs(position[0]) > self._max_xy or abs(position[1]) > self._max_xy:
             return True

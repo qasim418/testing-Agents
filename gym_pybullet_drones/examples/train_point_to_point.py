@@ -117,6 +117,7 @@ def build_env(
     snapshot_dir: Optional[str],
     use_city_world: bool,
     city_size: int,
+    velocity_scale: float,
 ) -> PointToPointAviary:
     """Construct a fresh instance of the point-to-point environment."""
 
@@ -126,7 +127,7 @@ def build_env(
         gui=gui,
         randomize_start=True,
         randomize_target=True,
-        velocity_scale=1.5,
+        velocity_scale=velocity_scale,
         obs=obs,
         ctrl_freq=ctrl_freq,
         use_built_in_obstacles=use_built_in_obstacles,
@@ -167,6 +168,7 @@ def main(args: argparse.Namespace) -> None:
                 snapshot_dir=snapshot_dir,
                 use_city_world=args.use_city_world,
                 city_size=args.city_size,
+                velocity_scale=args.velocity_scale,
             )
         ])
     else:
@@ -179,6 +181,7 @@ def main(args: argparse.Namespace) -> None:
                 snapshot_dir=snapshot_dir,
                 use_city_world=args.use_city_world,
                 city_size=args.city_size,
+                velocity_scale=args.velocity_scale,
             ),
             n_envs=args.num_envs,
             seed=args.seed,
@@ -206,6 +209,7 @@ def main(args: argparse.Namespace) -> None:
                     snapshot_dir=eval_snapshot_dir,
                     use_city_world=args.use_city_world,
                     city_size=args.city_size,
+                    velocity_scale=args.velocity_scale,
                 )
             )
 
@@ -349,6 +353,8 @@ if __name__ == "__main__":
                         help="Use procedural City world obstacles (default: True)")
     parser.add_argument("--city_size", type=int, default=50, metavar="",
                         help="City half-extent used by City world (default: 50)")
+    parser.add_argument("--velocity_scale", type=float, default=1.0, metavar="",
+                        help="Maximum velocity scale (default: 1.0)")
     parser.add_argument("--save_goal_snapshots", type=str2bool, default=True, metavar="",
                         help="Capture and store RGB frames when the agent reaches the goal (default: True)")
 
