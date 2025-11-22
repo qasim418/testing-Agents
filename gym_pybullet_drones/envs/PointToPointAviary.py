@@ -29,7 +29,7 @@ class PointToPointAviary(BaseRLAviary):
         obs: ObservationType = ObservationType.RGB,
         target_position: Optional[np.ndarray] = None,
         episode_len_sec: float = 12.0,
-        target_tolerance: float = 0.1,
+        target_tolerance: float = 0.25,
         max_xy: float = 5.0,
         max_z: float = 2.0,
         min_z: float = 0.05,
@@ -41,6 +41,7 @@ class PointToPointAviary(BaseRLAviary):
         use_built_in_obstacles: bool = False,
         use_city_world: bool = True,
         city_size: int = 50,
+        obstacle_density: float = 1.0,
         success_snapshot_dir: Optional[str] = None,
         seed: Optional[int] = None,
     ) -> None:
@@ -65,6 +66,7 @@ class PointToPointAviary(BaseRLAviary):
         self._use_built_in_obstacles = bool(use_built_in_obstacles)
         self._use_city_world = bool(use_city_world)
         self._city_size = int(city_size)
+        self._obstacle_density = float(obstacle_density)
         self._action_dim = 4
         self._discrete_actions = {
             0: np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32),  # Hover
@@ -81,9 +83,10 @@ class PointToPointAviary(BaseRLAviary):
         self._control_penalty_gain = 0.02
         self._progress_gain = 20.0
         self._success_bonus = 200.0
-        self._crash_penalty = 50.0
+        self._crash_penalty = 20.0  # Increased from 10.0
         # Stronger shaping defaults (RGB-style)
-        self._step_penalty = 0.005
+        self._step_penalty = 0.01 # Increased from 0.005
+        self._survival_bonus = 0.0  # Removed positive signal
         self._distance_penalty_gain = 0.05
         self._hover_penalty = 0.02
         self._distance_reduction_bonus = 0.5
@@ -144,7 +147,11 @@ class PointToPointAviary(BaseRLAviary):
             # Base class typically loads plane/arena. Avoid double planes by not calling BaseAviary._addObstacles
             super()._addObstacles()
             # Spawn procedural city objects into the current physics client
-            CityGenerator(self.CLIENT, seed=int(self._rng.integers(0, 1_000_000))).generate(size=self._city_size)
+            super()._addObstacles()
+            # Spawn procedural city objects into the current physics client
+            CityGenerator(self.CLIENT, seed=int(self._rng.integers(0, 1_000_000))).generate(
+                size=self._city_size, num_obstacles=self._obstacle_density
+            )
         elif self._use_built_in_obstacles:
             BaseAviary._addObstacles(self)
         else:
@@ -320,15 +327,25 @@ class PointToPointAviary(BaseRLAviary):
         velocity = state[10:13]
         distance = np.linalg.norm(self._target_position - position)
         progress = self._prev_distance - distance
+        
+        # 1. Proximity Reward (Dense, always positive)
+        # Range: ~0.02 (at 50m) to 1.0 (at 0m)
+        # proximity_reward = 1.0 / (1.0 + distance)
+        
         reward = self._progress_gain * progress
+        # reward += proximity_reward
+        # reward += self._survival_bonus
+        
         # reward -= self._velocity_penalty_gain * np.linalg.norm(velocity)
         # reward -= self._control_penalty_gain * np.linalg.norm(self._last_action[0, :3])
         reward -= self._step_penalty
         # reward -= self._distance_penalty_gain * distance
         # if self._last_action_index == 0:
         #     reward -= self._hover_penalty
+        
         if progress > 0:
             reward += self._distance_reduction_bonus * progress
+            
         # Contact-based collision shaping: penalize any physical contacts
         try:
             contacts = p.getContactPoints(bodyA=self.DRONE_IDS[0], physicsClientId=self.CLIENT)
@@ -451,6 +468,18 @@ class PointToPointAviary(BaseRLAviary):
             return True
         if abs(rpy[0]) > self._tilt_limit or abs(rpy[1]) > self._tilt_limit:
             return True
+        
+        # Check for object collisions (excluding ground)
+        try:
+            contacts = p.getContactPoints(bodyA=self.DRONE_IDS[0], physicsClientId=self.CLIENT)
+            for contact in contacts:
+                # contact[2] is bodyB (the object collided with)
+                # Check if it's not the ground plane (self.PLANE_ID)
+                if contact[2] != self.PLANE_ID:
+                    return True
+        except Exception:
+            pass
+            
         return False
 
     def _clear_markers(self) -> None:

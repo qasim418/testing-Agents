@@ -65,12 +65,12 @@ class CityGenerator:
         self.rng = np.random.RandomState(seed)
         self.f = ObjectFactory(client_id)
 
-    def generate(self, size=50):
+    def generate(self, size=50, num_obstacles=None):
         bodies = []
         bodies += self._roads(size)
-        bodies += self._buildings(size)
-        bodies += self._trees(size)
-        bodies += self._debris(size)
+        bodies += self._buildings(size, num_obstacles)
+        bodies += self._trees(size, num_obstacles)
+        bodies += self._debris(size, num_obstacles)
         return bodies
 
     def _roads(self, s):
@@ -85,11 +85,21 @@ class CityGenerator:
             bodies.append(self.f.road([o, -s, 0], [o, s, 0], 4.0))
         return bodies
 
-    def _buildings(self, s):
+    def _buildings(self, s, density=None):
         bodies = []
         colors = [[0.7, 0.4, 0.3, 1], [0.6, 0.6, 0.6, 1], [0.5, 0.6, 0.7, 1]]
-        for bx in range(-s // 15, s // 15):
-            for by in range(-s // 15, s // 15):
+        
+        # Default full density if None
+        if density is None:
+            density = 1.0
+            
+        # Calculate skip factor based on density (lower density = higher skip)
+        # density 1.0 -> skip 1 (every cell)
+        # density 0.1 -> skip 10 (every 10th cell)
+        skip = max(1, int(1.0 / max(0.01, density)))
+        
+        for bx in range(-s // 15, s // 15, skip):
+            for by in range(-s // 15, s // 15, skip):
                 if abs(bx) <= 0 and abs(by) <= 0:
                     continue
                 cx, cy = bx * 15 + 7.5, by * 15 + 7.5
@@ -103,24 +113,36 @@ class CityGenerator:
                     bodies.append(self.f.building([x, y, 0.0], [w, d, h], color))
         return bodies
 
-    def _trees(self, s):
+    def _trees(self, s, density=None):
         bodies = []
-        for i in range(-s // 3, s // 3, 4):
+        if density is None:
+            density = 1.0
+        
+        # Scale number of trees by density
+        step = max(4, int(4 / max(0.01, density)))
+        
+        for i in range(-s // 3, s // 3, step):
             if abs(i) < 3:
                 continue
             bodies += list(self.f.tree([i, 3, 0], float(self.rng.uniform(2, 3)), float(self.rng.uniform(1.5, 2.5))))
             bodies += list(self.f.tree([i, -3, 0], float(self.rng.uniform(2, 3)), float(self.rng.uniform(1.5, 2.5))))
             bodies += list(self.f.tree([3, i, 0], float(self.rng.uniform(2, 3)), float(self.rng.uniform(1.5, 2.5))))
             bodies += list(self.f.tree([-3, i, 0], float(self.rng.uniform(2, 3)), float(self.rng.uniform(1.5, 2.5))))
-        for _ in range(15):
+            
+        num_random_trees = int(15 * density)
+        for _ in range(num_random_trees):
             x, y = self.rng.uniform(-s / 2.0, s / 2.0, 2)
             if abs(x % 15) > 3 and abs(y % 15) > 3:
                 bodies += list(self.f.tree([float(x), float(y), 0.0], float(self.rng.uniform(2, 4)), float(self.rng.uniform(1.5, 3))))
         return bodies
 
-    def _debris(self, s):
+    def _debris(self, s, density=None):
         bodies = []
-        for _ in range(25):
+        if density is None:
+            density = 1.0
+            
+        num_debris = int(25 * density)
+        for _ in range(num_debris):
             x, y = self.rng.uniform(-s / 2.0, s / 2.0, 2)
             if abs(x % 15) > 3 and abs(y % 15) > 3:
                 for _ in range(self.rng.randint(2, 5)):

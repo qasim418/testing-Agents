@@ -148,6 +148,7 @@ def main(args: argparse.Namespace) -> None:
             success_snapshot_dir=snapshot_dir,
             seed=seed,
             record=args.record_video or args.record_frames,
+            obstacle_density=args.obstacle_density,
         )
 
         log_dir = None
@@ -190,21 +191,23 @@ if __name__ == "__main__":
                         help="Minimum separation between start and goal when randomizing")
     parser.add_argument("--episode_seconds", type=float, default=12.0,
                         help="Maximum episode length in seconds")
-    parser.add_argument("--velocity_scale", type=float, default=1.5,
+    parser.add_argument("--velocity_scale", type=float, default=1.0,
                         help="Scale for discrete velocity commands (m/s)")
     parser.add_argument("--max_xy", type=float, default=5.0,
                         help="Horizontal workspace half-extent (meters)")
     parser.add_argument("--max_z", type=float, default=2.0,
                         help="Maximum flight altitude (meters)")
-    parser.add_argument("--target_tolerance", type=float, default=0.1,
+    parser.add_argument("--target_tolerance", type=float, default=0.25,
                         help="Distance threshold for considering the goal reached (meters)")
-    parser.add_argument("--built_in_obstacles", type=utils_str2bool, default=True,
+    parser.add_argument("--built_in_obstacles", type=utils_str2bool, default=False,
                         help="Enable the default PyBullet obstacle set")
-    parser.add_argument("--use_city_world", type=utils_str2bool, default=False,
-                        help="Use procedural City world obstacles (default: False)")
+    parser.add_argument("--use_city_world", type=utils_str2bool, default=True,
+                        help="Use procedural City world obstacles (default: True)")
     parser.add_argument("--city_size", type=int, default=50,
                         help="City half-extent used by City world (default: 50)")
-    parser.add_argument("--obs_type", type=str, default="kin", choices=["kin", "rgb"],
+    parser.add_argument("--obstacle_density", type=float, default=0.5,
+                        help="Obstacle density for City world (default: 0.5)")
+    parser.add_argument("--obs_type", type=str, default="rgb", choices=["kin", "rgb"],
                         help="Observation modality to match the trained policy")
     parser.add_argument("--snapshot_dir", type=str, default=None,
                         help="Directory to store goal snapshots (RGB only)")
