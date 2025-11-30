@@ -44,6 +44,12 @@ LEAF_CLUMPS = 150
 NUM_OBSTACLES = 30  # Number of explicit navigation obstacles
 NUM_BUILDINGS = 15   # Number of buildings
 
+NUM_HUMANS = 2
+HUMAN_HEIGHT = 1.6
+HUMAN_RADIUS = 0.2
+# Use a unique color not present in the environment (e.g., bright magenta)
+HUMAN_COLOR = [1.0, 0.0, 1.0, 1.0]  # Bright magenta
+
 CLEARING = True
 CLEARING_RADIUS = 2.0  # keep a small clearing around center (optional)
 
@@ -94,6 +100,13 @@ class EnhancedForestWithObstacles:
         self.clearing = clearing
         self.clearing_radius = clearing_radius
 
+        # Human-related attributes
+        self.num_humans = NUM_HUMANS
+        self.human_ids = []
+        self.human_positions = []
+        self.human_label_ids = []
+        self.human_target_direction = None  # Will be set later
+
         # store placed object centers and radius for collision avoidance
         self.placed = []
 
@@ -119,6 +132,10 @@ class EnhancedForestWithObstacles:
         self._place_mushrooms()
         self._place_leaf_clumps()
         self._place_center_marker()
+        self._add_boundary_direction_labels()
+
+        # Place humans
+        self._place_humans()
 
         # Load drone
         self._load_drone()
@@ -589,6 +606,46 @@ class EnhancedForestWithObstacles:
         except Exception:
             pass
 
+    def _add_boundary_direction_labels(self):
+        """Add direction labels on the boundary walls."""
+        label_height = 2.0  # Height above ground for labels
+        label_distance = self.radius - 2.0  # Slightly inside boundary
+        
+        # North (+X)
+        p.addUserDebugText("NORTH", [label_distance, 0, label_height], 
+                          textColorRGB=[1, 1, 1], textSize=1.5, lifeTime=0, physicsClientId=self.client)
+        
+        # South (-X) 
+        p.addUserDebugText("SOUTH", [-label_distance, 0, label_height], 
+                          textColorRGB=[1, 1, 1], textSize=1.5, lifeTime=0, physicsClientId=self.client)
+        
+        # East (+Y)
+        p.addUserDebugText("EAST", [0, label_distance, label_height], 
+                          textColorRGB=[1, 1, 1], textSize=1.5, lifeTime=0, physicsClientId=self.client)
+        
+        # West (-Y)
+        p.addUserDebugText("WEST", [0, -label_distance, label_height], 
+                          textColorRGB=[1, 1, 1], textSize=1.5, lifeTime=0, physicsClientId=self.client)
+        
+        # Diagonals
+        diag_distance = label_distance * 0.7  # Slightly closer for diagonals
+        
+        # North-East
+        p.addUserDebugText("NORTH-EAST", [diag_distance, diag_distance, label_height], 
+                          textColorRGB=[1, 1, 1], textSize=1.2, lifeTime=0, physicsClientId=self.client)
+        
+        # North-West
+        p.addUserDebugText("NORTH-WEST", [diag_distance, -diag_distance, label_height], 
+                          textColorRGB=[1, 1, 1], textSize=1.2, lifeTime=0, physicsClientId=self.client)
+        
+        # South-East
+        p.addUserDebugText("SOUTH-EAST", [-diag_distance, diag_distance, label_height], 
+                          textColorRGB=[1, 1, 1], textSize=1.2, lifeTime=0, physicsClientId=self.client)
+        
+        # South-West
+        p.addUserDebugText("SOUTH-WEST", [-diag_distance, -diag_distance, label_height], 
+                          textColorRGB=[1, 1, 1], textSize=1.2, lifeTime=0, physicsClientId=self.client)
+
     def _load_drone(self):
         """Load a drone at the center of the clearing."""
         # Try to find the drone URDF file
@@ -956,8 +1013,17 @@ class EnhancedForestWithObstacles:
             )
             
             # Convert RGB image from uint8 to proper format
-            # PyBullet returns RGBA, we need to convert to RGB and flip vertically
+            # PyBullet returns RGBA as flat array, reshape to (height, width, 4)
             rgb_array = np.array(rgb_img, dtype=np.uint8)
+            
+            # Handle different return formats from PyBullet
+            if rgb_array.ndim == 1:
+                # Flat array, reshape to (height, width, 4) for RGBA
+                rgb_array = rgb_array.reshape((self.drone_camera_height, self.drone_camera_width, 4))
+            elif rgb_array.ndim != 3:
+                print(f"Warning: Unexpected camera image shape: {rgb_array.shape}, skipping frame")
+                return None
+                
             rgb_array = rgb_array[:, :, :3]  # Remove alpha channel (keep only RGB)
             rgb_array = np.flipud(rgb_array)  # Flip vertically (PyBullet's image is upside down)
             
@@ -1090,6 +1156,83 @@ class EnhancedForestWithObstacles:
                 
             except Exception as e:
                 print(f"Error displaying split-screen view: {e}")
+
+    def reposition_humans(self, target_direction=None):
+        """Reposition humans towards a target direction if provided."""
+        if not self.human_ids:
+            self._place_humans()
+            return
+        if target_direction:
+            self.human_target_direction = target_direction
+        for idx, human_id in enumerate(self.human_ids):
+            pos = self._sample_human_spot()
+            self.human_positions[idx] = pos
+            p.resetBasePositionAndOrientation(human_id, pos, [0, 0, 0, 1], physicsClientId=self.client)
+            self._update_human_label(idx, pos)
+
+    def _place_humans(self):
+        """Place humans in the environment, biased towards target direction if set."""
+        self._clear_human_labels()
+        self.human_ids = []
+        self.human_positions = []
+        self.human_label_ids = []
+        for i in range(self.num_humans):
+            pos = self._sample_human_spot()
+            if pos is None:
+                continue
+            human_id = self._create_human_body(pos, HUMAN_COLOR)
+            if human_id is not None:
+                self.human_ids.append(human_id)
+                self.human_positions.append(pos)
+                self.human_label_ids.append(self._create_human_label(pos))
+
+    def _sample_human_spot(self):
+        """Sample a spot for human placement directly along the target direction."""
+        for _ in range(60):
+            if self.human_target_direction:
+                # Place directly along the target direction
+                angle = math.atan2(self.human_target_direction[1], self.human_target_direction[0])
+                # Vary distance but keep straight direction
+                r = self.radius * random.uniform(0.4, 0.9)  # Further out towards boundary
+                x = r * math.cos(angle)
+                y = r * math.sin(angle)
+            else:
+                x, y = rand_in_disk(self.radius * 0.85)
+            if self._valid(x, y, min_sep=0.8):
+                return [x, y, HUMAN_HEIGHT / 2.0]
+        return None
+
+    def _create_human_body(self, position, color):
+        """Create a human body (cylinder)."""
+        coll = p.createCollisionShape(p.GEOM_CYLINDER, radius=HUMAN_RADIUS, height=HUMAN_HEIGHT, physicsClientId=self.client)
+        vis = p.createVisualShape(p.GEOM_CYLINDER, radius=HUMAN_RADIUS, length=HUMAN_HEIGHT, rgbaColor=color, physicsClientId=self.client)
+        return p.createMultiBody(baseMass=0, baseCollisionShapeIndex=coll, baseVisualShapeIndex=vis,
+                                  basePosition=position, physicsClientId=self.client)
+
+    def _create_human_label(self, position):
+        """Create a debug text label for the human."""
+        return p.addUserDebugText("H", [position[0], position[1], position[2] + HUMAN_HEIGHT/2 + 0.3],
+                                  textColorRGB=[1.0, 1.0, 0.2], textSize=1.4, lifeTime=0, physicsClientId=self.client)
+
+    def _update_human_label(self, idx, position):
+        """Update the position of a human's label."""
+        if idx < len(self.human_label_ids):
+            # Remove old label
+            try:
+                p.removeUserDebugItem(self.human_label_ids[idx], physicsClientId=self.client)
+            except:
+                pass
+            # Create new label
+            self.human_label_ids[idx] = self._create_human_label(position)
+
+    def _clear_human_labels(self):
+        """Clear all human debug labels."""
+        for label_id in self.human_label_ids:
+            try:
+                p.removeUserDebugItem(label_id, physicsClientId=self.client)
+            except:
+                pass
+        self.human_label_ids = []
 
     def run(self, fps=GUI_FPS):
         """Main loop — keeps GUI open until ESC or 'q' pressed or window closed."""

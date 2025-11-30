@@ -23,6 +23,32 @@ from train_dqn import RandomPointNavEnv
 from LLM.llm import Navigator
 
 
+def _detect_human_pixels(image: np.ndarray):
+    """Improved color/shape detection for hi-vis human props, reduces false positives."""
+    if image is None or image.size == 0:
+        return False, None, 0
+    rgb = image[:, :, :3]
+    # Detect unique magenta color (R~255, G~0, B~255)
+    mask = (
+        (rgb[:, :, 0] > 220)
+        & (rgb[:, :, 1] < 50)
+        & (rgb[:, :, 2] > 220)
+    )
+    count = int(np.count_nonzero(mask))
+    if count < 800:
+        return False, None, count
+    ys, xs = np.where(mask)
+    if len(xs) == 0 or len(ys) == 0:
+        return False, None, count
+    x_span = xs.max() - xs.min()
+    y_span = ys.max() - ys.min()
+    aspect_ratio = y_span / (x_span + 1e-5)
+    if aspect_ratio < 1.2:
+        return False, None, count
+    center = (int(xs.mean()), int(ys.mean()))
+    return True, center, count
+
+
 def _unwrap_reset(obs_result):
     """Handle both Gymnasium (obs, info) and Gym (obs) reset signatures."""
     if isinstance(obs_result, tuple):
@@ -155,6 +181,14 @@ def test_model(
         print(f"[Mission] Initial path loaded: {len(initial_segment)} waypoints")
         print(f"[Mission] Main waypoints: {main_waypoints}")
         
+        # Reposition humans towards the mission target direction
+        if hasattr(env.scene, 'reposition_humans') and initial_segment:
+            target_direction = np.array(navigator.target_pos) - np.array([0.0, 0.0, 1.5])
+            target_direction[2] = 0  # Ignore Z for direction
+            target_direction = target_direction / np.linalg.norm(target_direction)  # Normalize
+            env.scene.reposition_humans(target_direction.tolist())
+            print(f"[Mission] Humans repositioned towards direction: {target_direction}")
+
         for episode in range(1, num_episodes + 1):
             obs = _unwrap_reset(env.reset())
             
@@ -196,6 +230,10 @@ def test_model(
             # Path visualization
             path_points = [start_pos.copy()]
             last_path_draw_step = 0
+            
+            # Human detection tracking
+            human_spotted = False
+            mission_requires_human = "human" in mission_story.lower() or "person" in mission_story.lower()
             
             # Pause functionality
             paused = False
@@ -252,6 +290,30 @@ def test_model(
                 if steps - last_path_draw_step >= 10 and len(path_points) >= 2:
                     p.addUserDebugLine(path_points[-2], path_points[-1], [0, 1, 1], 2.0, lifeTime=0)  # Cyan line for drone path
                     last_path_draw_step = steps
+                
+                # Human detection
+                camera_frame = None
+                if hasattr(env.scene, "_get_drone_camera_image"):
+                    camera_frame = env.scene._get_drone_camera_image()
+                detected, center, pix_count = _detect_human_pixels(camera_frame)
+                if detected and not human_spotted:
+                    print(f"  ✓ Human detected through camera at pixels {center} (mask={pix_count})")
+                    # Save snapshot
+                    try:
+                        from PIL import Image
+                        snap_dir = "detected_human_snaps"
+                        os.makedirs(snap_dir, exist_ok=True)
+                        snap_path = os.path.join(snap_dir, f"human_detected_ep{episode}_step{steps}.png")
+                        Image.fromarray(camera_frame).save(snap_path)
+                        print(f"  ✓ Saved snapshot: {snap_path}")
+                    except Exception as e:
+                        print(f"  ✗ Could not save snapshot: {e}")
+                    # Print drone coordinates and detection message
+                    print(f"I got human at this xyz location: {drone_pos.tolist()}")
+                    human_spotted = True
+                    # Terminate search immediately after detection
+                    terminated = True
+                    break
                 
                 # --- STUCK DETECTION ---
                 dist_to_wp = np.linalg.norm(drone_pos - target_pos)
@@ -353,8 +415,9 @@ def test_model(
             episode_lengths.append(steps)
             # Check if path is complete (no more segments available)
             path_complete = (current_main_wp_idx >= len(main_waypoints) and not navigator.get_next_segment(drone_pos.tolist()))
-            status = "SUCCESS" if path_complete else "TIMEOUT/CRASH"
-            print(f"Reward: {ep_reward:.2f} | Steps: {steps} | Status: {status}")
+            mission_success = path_complete and (not mission_requires_human or human_spotted)
+            status = "SUCCESS" if mission_success else ("HUMAN_NOT_FOUND" if mission_requires_human and not human_spotted else "TIMEOUT/CRASH")
+            print(f"Reward: {ep_reward:.2f} | Steps: {steps} | Status: {status} | Human spotted: {human_spotted}")
             time.sleep(0.5)
 
     except KeyboardInterrupt:
